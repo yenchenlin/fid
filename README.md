@@ -3,11 +3,8 @@
 ## Usage
 
 Requirements:
-- python3
 - pytorch
 - torchvision
-- numpy
-- scipy
 
 To compute the FID score between two datasets, where images of each dataset are contained in an individual folder:
 ```
