@@ -251,6 +251,7 @@ def calculate_fid_given_paths(paths, batch_size, cuda, dims):
     # Backward
     print("Running backward ...")
     fid_value[0][0].backward()
+    print("Gradient for images:")
     print(imgs1.grad)
 
     return fid_value
