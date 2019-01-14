@@ -1,11 +1,10 @@
 # FID score in PyTorch
 
-## Usage
-
-Requirements:
+## Requirements:
 - pytorch
 - torchvision
 
+## Usage
 To compute the FID score between two datasets, where images of each dataset are contained in an individual folder:
 ```
 python ./fid_score.py path/to/dataset1 path/to/dataset2
