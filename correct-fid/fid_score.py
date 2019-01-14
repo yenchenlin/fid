@@ -11,7 +11,7 @@ distribution given by summary statistics (in pickle format).
 
 The FID is calculated by assuming that X_1 and X_2 are the activations of
 the pool_3 layer of the inception net for generated samples and real world
-samples respectivly.
+samples respectively.
 
 See --help to see further details.
 
@@ -44,7 +44,6 @@ from torch.autograd import Variable
 from torch.nn.functional import adaptive_avg_pool2d
 
 from inception import InceptionV3
-from utils_pytorch import sqrtm, cov
 
 
 parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
@@ -59,23 +58,6 @@ parser.add_argument('--dims', type=int, default=2048,
                           'By default, uses pool3 features'))
 parser.add_argument('-c', '--gpu', default='', type=str,
                     help='GPU to use (leave blank for CPU only)')
-
-
-def load_images(path, requires_grad=False):
-    path = pathlib.Path(path)
-    files = list(path.glob('*.jpg')) + list(path.glob('*.png'))
-
-    imgs = np.array([imread(str(fn)).astype(np.float32) for fn in files])
-
-    # Bring images to shape (B, 3, H, W)
-    imgs = imgs.transpose((0, 3, 1, 2))
-
-    # Rescale images to be between 0 and 1
-    imgs /= 255
-
-    imgs = Variable(torch.from_numpy(imgs),
-                    requires_grad=requires_grad)
-    return imgs
 
 
 def get_activations(images, model, batch_size=64, dims=2048,
@@ -109,7 +91,7 @@ def get_activations(images, model, batch_size=64, dims=2048,
     n_batches = d0 // batch_size
     n_used_imgs = n_batches * batch_size
 
-    pred_arr = []
+    pred_arr = np.empty((n_used_imgs, dims))
     for i in range(n_batches):
         if verbose:
             print('\rPropagating batch %d/%d' % (i + 1, n_batches),
@@ -117,7 +99,8 @@ def get_activations(images, model, batch_size=64, dims=2048,
         start = i * batch_size
         end = start + batch_size
 
-        batch = images[start:end]
+        batch = torch.from_numpy(images[start:end]).type(torch.FloatTensor)
+        batch = Variable(batch, volatile=True)
         if cuda:
             batch = batch.cuda()
 
@@ -128,13 +111,11 @@ def get_activations(images, model, batch_size=64, dims=2048,
         if pred.shape[2] != 1 or pred.shape[3] != 1:
             pred = adaptive_avg_pool2d(pred, output_size=(1, 1))
 
-        #pred_arr[start:end] = pred.cpu().data.numpy().reshape(batch_size, -1)
-        pred_arr.append(pred.view(batch_size, -1))
+        pred_arr[start:end] = pred.cpu().data.numpy().reshape(batch_size, -1)
 
     if verbose:
         print(' done')
 
-    pred_arr = torch.stack(pred_arr, dim=0)
     return pred_arr
 
 
@@ -151,19 +132,20 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
                inception net (like returned by the function 'get_predictions')
                for generated samples.
     -- mu2   : The sample mean over activations, precalculated on an
-               representive data set.
+               representative data set.
     -- sigma1: The covariance matrix over activations for generated samples.
     -- sigma2: The covariance matrix over activations, precalculated on an
-               representive data set.
+               representative data set.
 
     Returns:
     --   : The Frechet Distance.
     """
 
-    assert len(list(mu1.size())) >= 1
-    assert len(list(mu2.size())) >= 1
-    assert len(list(sigma1.size())) >= 2
-    assert len(list(sigma2.size())) >= 2
+    mu1 = np.atleast_1d(mu1)
+    mu2 = np.atleast_1d(mu2)
+
+    sigma1 = np.atleast_2d(sigma1)
+    sigma2 = np.atleast_2d(sigma2)
 
     assert mu1.shape == mu2.shape, \
         'Training and test mean vectors have different lengths'
@@ -173,28 +155,27 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     diff = mu1 - mu2
 
     # Product might be almost singular
-    covmean = sqrtm(torch.mm(sigma1, sigma2))
-    covmean_np = covmean.detach().numpy()
-    if not np.isfinite(covmean_np).all():
+    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    print("covmean shape:", sigma1.dot(sigma2).shape)
+    if not np.isfinite(covmean).all():
         msg = ('fid calculation produces singular product; '
                'adding %s to diagonal of cov estimates') % eps
         print(msg)
-        offset = torch.eye(sigma1.shape[0]) * eps
-        covmean = torch.mm(sqrtm((sigma1 + offset), (sigma2 + offset)))
+        offset = np.eye(sigma1.shape[0]) * eps
+        covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
 
     # Numerical error might give slight imaginary component
-    if np.iscomplexobj(covmean_np):
-        m = np.max(np.abs(covmean_np.imag))
-        raise ValueError('Imaginary component {}'.format(m))
-        # if not np.allclose(np.diagonal(covmean_np).imag, 0, atol=1e-3):
-        #     m = np.max(np.abs(covmean_np.imag))
-        #     raise ValueError('Imaginary component {}'.format(m))
-        # covmean = covmean.real
+    if np.iscomplexobj(covmean):
+        print("covmean is complex")
+        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+            m = np.max(np.abs(covmean.imag))
+            raise ValueError('Imaginary component {}'.format(m))
+        covmean = covmean.real
 
-    tr_covmean = torch.trace(covmean)
-    diff = diff.view(1, -1)
-    return (torch.mm(diff, diff.t()) + torch.trace(sigma1) +
-            torch.trace(sigma2) - 2 * tr_covmean)
+    tr_covmean = np.trace(covmean)
+    print(diff.dot(diff), np.trace(sigma1), np.trace(sigma2), tr_covmean)
+    return (diff.dot(diff) + np.trace(sigma1) +
+            np.trace(sigma2) - 2 * tr_covmean)
 
 
 def calculate_activation_statistics(images, model, batch_size=64,
@@ -218,11 +199,32 @@ def calculate_activation_statistics(images, model, batch_size=64,
                the inception model.
     """
     act = get_activations(images, model, batch_size, dims, cuda, verbose)
-    act = act.view(-1, dims)
-
-    mu = torch.mean(act, dim=0).type(torch.double)
-    sigma = cov(act, rowvar=False)
+    mu = np.mean(act, axis=0)
+    sigma = np.cov(act, rowvar=False)
     return mu, sigma
+
+
+def _compute_statistics_of_path(path, model, batch_size, dims, cuda):
+    if path.endswith('.npz'):
+        f = np.load(path)
+        m, s = f['mu'][:], f['sigma'][:]
+        f.close()
+    else:
+        path = pathlib.Path(path)
+        files = list(path.glob('*.jpg')) + list(path.glob('*.png'))
+
+        imgs = np.array([imread(str(fn)).astype(np.float32) for fn in files])
+
+        # Bring images to shape (B, 3, H, W)
+        imgs = imgs.transpose((0, 3, 1, 2))
+
+        # Rescale images to be between 0 and 1
+        imgs /= 255
+
+        m, s = calculate_activation_statistics(imgs, model, batch_size,
+                                               dims, cuda)
+
+    return m, s
 
 
 def calculate_fid_given_paths(paths, batch_size, cuda, dims):
@@ -237,21 +239,11 @@ def calculate_fid_given_paths(paths, batch_size, cuda, dims):
     if cuda:
         model.cuda()
 
-    imgs1 = load_images(paths[0], requires_grad=True)
-    imgs2 = load_images(paths[1], requires_grad=False)
-
-    m1, s1 = calculate_activation_statistics(imgs1, model, batch_size,
-                                             dims, cuda)
-    m2, s2 = calculate_activation_statistics(imgs2, model, batch_size,
-                                             dims, cuda)
-
-    print(m1.size(), s1.size())
+    m1, s1 = _compute_statistics_of_path(paths[0], model, batch_size,
+                                         dims, cuda)
+    m2, s2 = _compute_statistics_of_path(paths[1], model, batch_size,
+                                         dims, cuda)
     fid_value = calculate_frechet_distance(m1, s1, m2, s2)
-
-    # Backward
-    print("Running backward ...")
-    fid_value[0][0].backward()
-    print(imgs1.grad)
 
     return fid_value
 

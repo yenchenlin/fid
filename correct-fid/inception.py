@@ -110,12 +110,12 @@ class InceptionV3(nn.Module):
         Parameters
         ----------
         inp : torch.autograd.Variable
-            Input tensor of shape Bx3xHxW. Values are expected to be in
+            Input tensor of shape Bx3xHxW. Values are expected to be in 
             range (0, 1)
 
         Returns
         -------
-        List of torch.autograd.Variable, corresponding to the selected output
+        List of torch.autograd.Variable, corresponding to the selected output 
         block, sorted ascending by index
         """
         outp = []
@@ -126,9 +126,9 @@ class InceptionV3(nn.Module):
 
         if self.normalize_input:
             x = x.clone()
-            x[:, 0] = x[:, 0].clone() * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
-            x[:, 1] = x[:, 1].clone() * (0.224 / 0.5) + (0.456 - 0.5) / 0.5
-            x[:, 2] = x[:, 2].clone() * (0.225 / 0.5) + (0.406 - 0.5) / 0.5
+            x[:, 0] = x[:, 0] * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
+            x[:, 1] = x[:, 1] * (0.224 / 0.5) + (0.456 - 0.5) / 0.5
+            x[:, 2] = x[:, 2] * (0.225 / 0.5) + (0.406 - 0.5) / 0.5
 
         for idx, block in enumerate(self.blocks):
             x = block(x)
